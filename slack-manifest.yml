@@ -1,5 +1,5 @@
 # Paste this into https://api.slack.com/apps → Create New App → From a manifest.
-# Replace slack-block-bot-production.up.railway.app with the Railway URL (e.g. quiet-hours-bot-production.up.railway.app).
+# The Railway URL is already filled in below.
 display_information:
   name: Quiet Hours
   description: Pauses notifications during team quiet blocks and holds messages until they end.
