@@ -44,6 +44,7 @@ const app = new App({
         if (block && installation.user?.token) {
           await quietUser(installation.user.id, installation.user.token, block);
         }
+        logRoster().catch(console.error);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(page('You’re connected ✅',
           'Block times will now pause your Slack notifications automatically, and anything you send during a block will be held and delivered when it ends. You can close this tab.'));
@@ -219,6 +220,23 @@ app.event('tokens_revoked', async ({ event }) => {
   for (const id of event.tokens?.oauth || []) store.removeUser(id);
 });
 
+// Write the list of connected people (by name) to the log, for admins.
+async function logRoster() {
+  const users = store.allUsers();
+  const botToken = store.getBotToken();
+  const names = await Promise.all(users.map(async (u) => {
+    if (!botToken) return u.userId;
+    try {
+      const { user } = await new WebClient(botToken).users.info({ user: u.userId });
+      return user.real_name || user.profile?.display_name || user.name || u.userId;
+    } catch {
+      return u.userId;
+    }
+  }));
+  names.sort((a, b) => a.localeCompare(b));
+  console.log(`Connected people (${names.length}): ${names.join(', ') || 'none'}`);
+}
+
 function publicUrl() {
   const d = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN && `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);
   return (d || '').replace(/\/$/, '');
@@ -228,6 +246,7 @@ function publicUrl() {
   const port = Number(process.env.PORT) || 3000;
   await app.start(port);
   console.log(`Block Bot listening on ${port}; data in ${store.DATA_DIR}`);
+  await logRoster().catch(console.error);
   // If we (re)started mid-block, make sure everyone is quietened.
   await startBlock().catch(console.error);
 })();
