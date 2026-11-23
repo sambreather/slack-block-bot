@@ -26,14 +26,14 @@ To change the blocks, edit `BLOCKS` in `src/schedule.js` and push.
 
 1. **Create the Slack app.** Go to https://api.slack.com/apps → *Create New App* →
    *From a manifest* → pick the workspace → paste `slack-manifest.yml`, with
-   `YOUR-APP-URL` replaced by the Railway domain. If the workspace needs admin
+   `slack-block-bot-production.up.railway.app` replaced by the Railway domain. If the workspace needs admin
    approval for apps, a Slack admin has to do or approve this step.
 2. **Copy the secrets to Railway.** From *Basic Information* in the Slack app,
    copy the Client ID, Client Secret and Signing Secret into the Railway service
    variables `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` and `SLACK_SIGNING_SECRET`.
 3. **Verify the events URL.** Back in Slack → *Event Subscriptions*, click
    *Retry* next to the Request URL until it shows *Verified*.
-4. **Everyone connects.** Each person opens `https://YOUR-APP-URL/slack/install`
+4. **Everyone connects.** Each person opens `https://slack-block-bot-production.up.railway.app/slack/install`
    and clicks *Allow*. It takes about 10 seconds.
 
 ## Environment variables
