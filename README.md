@@ -11,10 +11,10 @@ Enforces the team's no-communication blocks (UK time):
 **What it does for everyone who has connected their account**
 
 - At the start of a block, turns on Do Not Disturb and sets the status
-  🔕 *Quiet block until 15:00* (both clear themselves when the block ends).
+  *Block until 3pm* (both clear themselves when the block ends).
 - If you send a message during a block, the bot removes it and re-sends it
-  automatically, as you, the moment the block ends. You get one private DM
-  per block explaining this.
+  automatically, as you, the moment the block ends. The first time per block
+  you get a private note: *It’s block time, your message will be delivered at 3pm.*
 - Include `!urgent` in a message and it goes straight through.
 - Messages with files, or thread replies also sent to the channel, can't be
   held, so they go through and you get a reminder instead.
@@ -46,6 +46,10 @@ To change the blocks, edit `BLOCKS` in `src/schedule.js` and push.
 | `STATE_SECRET`         | Any long random string                            |
 | `DATA_DIR`             | Where tokens are stored (`/data` on a volume)     |
 | `URGENT_KEYWORD`       | Optional, default `!urgent`                       |
+| `STATUS_TEXT`          | Optional, default `Block until {time}`            |
+| `HOLD_MESSAGE`         | Optional, default `It’s block time, your message will be delivered at {time}.` |
+
+`{time}` is replaced with the block's end time, e.g. `3pm` or `4.30pm`.
 
 ## Development
 

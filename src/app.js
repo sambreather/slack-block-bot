@@ -79,7 +79,18 @@ function page(title, body) {
 <h1 style="font-size:1.4rem">${title}</h1><p>${body}</p></body>`;
 }
 
-const fmt = (dt) => dt.setZone(TZ).toFormat('HH:mm');
+// UK-style times: "3pm", "4.30pm"
+const fmt = (dt) => {
+  const t = dt.setZone(TZ);
+  const h = t.hour % 12 || 12;
+  const m = t.minute ? `.${String(t.minute).padStart(2, '0')}` : '';
+  return `${h}${m}${t.hour < 12 ? 'am' : 'pm'}`;
+};
+
+// Editable wording (set these as Railway variables to change them; {time} = block end).
+const STATUS_TEXT = process.env.STATUS_TEXT || 'Block until {time}';
+const HOLD_MESSAGE = process.env.HOLD_MESSAGE || 'It’s block time, your message will be delivered at {time}.';
+const fill = (template, block) => template.replaceAll('{time}', fmt(block.end));
 
 // ---------------------------------------------------------------------------
 // Block start: DND + status for every connected person
@@ -91,7 +102,7 @@ async function quietUser(userId, token, block) {
     await client.dnd.setSnooze({ num_minutes: minutes });
     await client.users.profile.set({
       profile: {
-        status_text: `Quiet block until ${fmt(block.end)}`,
+        status_text: fill(STATUS_TEXT, block),
         status_emoji: STATUS_EMOJI,
         status_expiration: Math.floor(block.end.toSeconds()),
       },
@@ -187,10 +198,7 @@ app.event('message', async ({ event, body }) => {
     try {
       await holdMessage(event, sender, block);
       console.log(`Held message from ${event.user} in ${event.channel} until ${until}`);
-      await dmSender(event.user, teamId,
-        `:no_bell: It’s a quiet block until *${until}*. I’ve held your message and it’ll send automatically at ${until} — ` +
-        `anything else you send before then will be held the same way.\n` +
-        `If it really can’t wait, send it again with *${URGENT_KEYWORD}* in it.`, block);
+      await dmSender(event.user, teamId, fill(HOLD_MESSAGE, block), block);
       return;
     } catch (err) {
       console.error('Could not hold message:', err.data?.error || err.message);
@@ -199,7 +207,7 @@ app.event('message', async ({ event, body }) => {
   }
 
   await dmSender(event.user, teamId,
-    `:no_bell: Heads up — it’s a quiet block until *${until}*, so people may not see your message until then. ` +
+    `It’s block time until ${until}, so people may not see your message until then. ` +
     (sender
       ? `(I couldn’t hold that one — messages with files or shared to a channel go straight through.)`
       :`<${publicUrl()}/slack/install|Connect your account> and the bot will hold messages for you automatically.`),
