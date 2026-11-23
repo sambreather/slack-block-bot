@@ -1,0 +1,39 @@
+# Paste this into https://api.slack.com/apps → Create New App → From a manifest.
+# Replace YOUR-APP-URL with the Railway URL (e.g. quiet-hours-bot-production.up.railway.app).
+display_information:
+  name: Quiet Hours
+  description: Pauses notifications during team quiet blocks and holds messages until they end.
+  background_color: "#2c2d30"
+features:
+  bot_user:
+    display_name: Quiet Hours
+    always_online: true
+oauth_config:
+  redirect_urls:
+    - https://YOUR-APP-URL/slack/oauth_redirect
+  scopes:
+    bot:
+      - chat:write
+      - im:write
+      - users:read
+    user:
+      - chat:write
+      - dnd:write
+      - users.profile:write
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+settings:
+  event_subscriptions:
+    request_url: https://YOUR-APP-URL/slack/events
+    user_events:
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+    bot_events:
+      - tokens_revoked
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
