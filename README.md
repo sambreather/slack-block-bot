@@ -1,4 +1,4 @@
-# Quiet Hours — Slack bot
+# Block Bot — Slack bot
 
 Enforces the team's no-communication blocks (UK time):
 

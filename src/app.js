@@ -1,4 +1,4 @@
-// Quiet Hours bot for Slack.
+// Block Bot for Slack.
 //  - At the start of each quiet block: pauses notifications (DND) and sets a
 //    "Quiet block" status for everyone who has connected the bot.
 //  - During a block: messages from connected people are quietly held and
@@ -46,7 +46,7 @@ const app = new App({
         }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(page('You’re connected ✅',
-          'Quiet blocks will now pause your Slack notifications automatically, and anything you send during a block will be held and delivered when it ends. You can close this tab.'));
+          'Block times will now pause your Slack notifications automatically, and anything you send during a block will be held and delivered when it ends. You can close this tab.'));
       },
       failure: async (error, _opts, _req, res) => {
         console.error('Install failed', error);
@@ -61,7 +61,7 @@ const app = new App({
       method: ['GET'],
       handler: (_req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(page('Quiet Hours bot',
+        res.end(page('Block Bot',
           'Running. <a href="/slack/install">Connect your Slack account</a>.'));
       },
     },
@@ -227,7 +227,7 @@ function publicUrl() {
 (async () => {
   const port = Number(process.env.PORT) || 3000;
   await app.start(port);
-  console.log(`Quiet Hours bot listening on ${port}; data in ${store.DATA_DIR}`);
+  console.log(`Block Bot listening on ${port}; data in ${store.DATA_DIR}`);
   // If we (re)started mid-block, make sure everyone is quietened.
   await startBlock().catch(console.error);
 })();
