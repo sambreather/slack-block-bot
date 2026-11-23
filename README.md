@@ -57,3 +57,8 @@ To change the blocks, edit `BLOCKS` in `src/schedule.js` and push.
 npm install
 npm test
 ```
+
+## Who's connected
+
+Each time the bot starts, and whenever someone new connects, it writes a line
+to the Railway deploy log: `Connected people (N): …`.
