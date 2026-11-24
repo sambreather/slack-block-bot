@@ -49,6 +49,7 @@ const app = new App({
     directInstall: true,
     callbackOptions: {
       success: async (installation, _opts, _req, res) => {
+        console.log(`Connected ${installation.user?.id} with scopes: ${(installation.user?.scopes || []).join(',')}`);
         // If someone connects mid-block, quiet them straight away.
         if (installation.user?.token) {
           const end = effectiveEnd(installation.user.id);
@@ -59,10 +60,11 @@ const app = new App({
         res.end(page('You’re connected ✅',
           'Block times will now pause your Slack notifications automatically, and anything you send during a block will be held and delivered when it ends. You can close this tab.'));
       },
-      failure: async (error, _opts, _req, res) => {
-        console.error('Install failed', error);
+      failure: async (error, _opts, req, res) => {
+        const q = new URL(req.url, 'http://x').searchParams;
+        console.error(`Install failed: ${error.code || error.message}; Slack said: ${q.get('error') || '(nothing)'}`);
         res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(page('Something went wrong', 'The connection didn’t complete. Please try the link again.'));
+        res.end(page('Something went wrong', `The connection didn’t complete${q.get('error') ? ` (Slack said: ${q.get('error')})` : ''}. Please try the link again.`));
       },
     },
   },
@@ -609,8 +611,8 @@ async function logRoster() {
   }));
   names.sort((a, b) => a.localeCompare(b));
   console.log(`Connected people (${names.length}): ${names.join(', ') || 'none'}`);
-  const upgraded = users.filter((u) => (u.scopes || []).includes('im:read')).length;
-  console.log(`${upgraded} of ${users.length} have reconnected since /block was added`);
+  const upgraded = users.filter((u) => (u.scopes || []).includes('im:read'));
+  console.log(`${upgraded.length} of ${users.length} have reconnected since /block was added: ${upgraded.map((u) => u.userId).join(', ')}`);
 }
 
 function publicUrl() {
