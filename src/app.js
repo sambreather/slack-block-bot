@@ -105,6 +105,17 @@ const fill = (template, end, name = '') => template.replaceAll('{time}', fmt(end
 
 const connectLink = () => `<${publicUrl()}/slack/install|Connect your account>`;
 
+// Pairs of people whose DMs to each other are never held during team blocks.
+// Railway variable ALLOW_DMS, e.g. "U06QZTKT7+U0B5PTTGRFH, U111+U222".
+const ALLOWED_PAIRS = (process.env.ALLOW_DMS || '')
+  .split(',')
+  .map((p) => p.split('+').map((x) => x.trim()).filter(Boolean))
+  .filter((p) => p.length === 2);
+
+function allowedPartnersOf(userId) {
+  return ALLOWED_PAIRS.filter((p) => p.includes(userId)).map((p) => (p[0] === userId ? p[1] : p[0]));
+}
+
 // ---------------------------------------------------------------------------
 // Who is blocked, and until when
 // ---------------------------------------------------------------------------
@@ -138,10 +149,15 @@ function effectiveEnd(userId, now = DateTime.now()) {
 async function quietUser(userId, token) {
   const end = effectiveEnd(userId);
   if (!end) return;
+  // People in an allowed DM pair keep notifications on during team blocks (so they hear
+  // from each other); everyone else's messages to them are still held. A personal block
+  // still pauses them as normal.
+  const inPersonal = activePersonal().some((a) => a.userId === userId);
+  const pause = inPersonal || !allowedPartnersOf(userId).length;
   const client = new WebClient(token);
   const minutes = Math.max(1, Math.ceil(end.diffNow('minutes').minutes));
   try {
-    await client.dnd.setSnooze({ num_minutes: minutes });
+    if (pause) await client.dnd.setSnooze({ num_minutes: minutes });
     await client.users.profile.set({
       profile: {
         status_text: fill(STATUS_TEXT, end),
@@ -149,7 +165,7 @@ async function quietUser(userId, token) {
         status_expiration: Math.floor(end.toSeconds()),
       },
     });
-    console.log(`Quietened ${userId} until ${fmt(end)}`);
+    console.log(`${pause ? 'Quietened' : 'Set status (notifications left on) for'} ${userId} until ${fmt(end)}`);
   } catch (err) {
     console.error(`Could not quieten ${userId}:`, err.data?.error || err.message);
     if (['token_revoked', 'invalid_auth', 'account_inactive'].includes(err.data?.error)) {
@@ -281,17 +297,6 @@ async function otherPartyOf(event) {
     }
   }
   return null;
-}
-
-// Pairs of people whose DMs to each other are never held during team blocks.
-// Railway variable ALLOW_DMS, e.g. "U06QZTKT7+U0B5PTTGRFH, U111+U222".
-const ALLOWED_PAIRS = (process.env.ALLOW_DMS || '')
-  .split(',')
-  .map((p) => p.split('+').map((x) => x.trim()).filter(Boolean))
-  .filter((p) => p.length === 2);
-
-function allowedPartnersOf(userId) {
-  return ALLOWED_PAIRS.filter((p) => p.includes(userId)).map((p) => (p[0] === userId ? p[1] : p[0]));
 }
 
 /** For a 1:1 DM, is the other person someone the sender is allowed to message freely? */
