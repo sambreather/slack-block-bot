@@ -17,7 +17,7 @@ const { WebClient } = require('@slack/web-api');
 const cron = require('node-cron');
 const { DateTime } = require('luxon');
 
-const { TZ, currentBlock, startCrons } = require('./schedule');
+const { TZ, currentBlock, startCrons, endCrons } = require('./schedule');
 const { decide, isNewHumanMessage, canHold, isUrgent } = require('./policy');
 const { parseBlock, fmtTime, fmtRange } = require('./parse-block');
 const store = require('./store');
@@ -156,15 +156,18 @@ async function quietUser(userId, token) {
   }
 }
 
-async function unquietUser(userId, token) {
+async function unquietUser(userId, token, { clearStatus = true } = {}) {
   const client = new WebClient(token);
   try {
     await client.dnd.endSnooze();
+    console.log(`Unpaused notifications for ${userId}`);
   } catch (err) {
     if (err.data?.error !== 'snooze_not_active') console.error(`endSnooze ${userId}:`, err.data?.error || err.message);
   }
-  await client.users.profile.set({ profile: { status_text: '', status_emoji: '', status_expiration: 0 } })
-    .catch((err) => console.error(`clear status ${userId}:`, err.data?.error || err.message));
+  if (clearStatus) {
+    await client.users.profile.set({ profile: { status_text: '', status_emoji: '', status_expiration: 0 } })
+      .catch((err) => console.error(`clear status ${userId}:`, err.data?.error || err.message));
+  }
 }
 
 async function startTeamBlock() {
@@ -175,8 +178,22 @@ async function startTeamBlock() {
   await Promise.all(users.map((u) => quietUser(u.userId, u.token)));
 }
 
+// When a team block ends, switch DND off for everyone who isn't still in a personal block.
+// (Slack's own snooze timer isn't always reliable, so we don't depend on it.)
+async function endTeamBlock() {
+  const users = store.allUsers();
+  console.log(`Team block ended; unpausing ${users.length} connected user(s)`);
+  for (const u of users) {
+    if (effectiveEnd(u.userId)) await quietUser(u.userId, u.token); // still in a personal block
+    else await unquietUser(u.userId, u.token, { clearStatus: false }); // status expires by itself
+  }
+}
+
 for (const expr of startCrons()) {
   cron.schedule(expr, () => startTeamBlock().catch(console.error), { timezone: TZ });
+}
+for (const expr of endCrons()) {
+  cron.schedule(expr, () => endTeamBlock().catch(console.error), { timezone: TZ });
 }
 
 // Personal blocks: start any that are due (checked every 20 seconds).
@@ -186,6 +203,18 @@ async function tickPersonal() {
   ticking = true;
   try {
     const now = DateTime.now();
+    // Blocks that have just finished: switch DND off (unless something else still applies).
+    for (const [userId, blocks] of Object.entries(store.personalAll())) {
+      for (const block of blocks) {
+        if (!block.started || block.ended || toDT(block.end) > now) continue;
+        store.updatePersonalBlock(userId, block.id, (b) => { b.ended = true; });
+        const user = store.getUser(userId);
+        if (!user) continue;
+        console.log(`Personal block ended for ${userId}`);
+        if (effectiveEnd(userId, now)) await quietUser(userId, user.token);
+        else await unquietUser(userId, user.token, { clearStatus: false });
+      }
+    }
     store.prunePersonalBlocks(now.toUTC().toISO());
     for (const { userId, block } of activePersonal(now)) {
       if (block.started) continue;
@@ -267,12 +296,29 @@ function firstTime(key) {
   return true;
 }
 
-async function dmOnce(userId, teamId, text, onceKey) {
+/**
+ * Tell the sender something, once per key. Shown privately in the conversation they
+ * were typing in ("Only visible to you"); falls back to a DM from the bot.
+ */
+async function notifyOnce(event, teamId, text, onceKey) {
   const now = Date.now();
   for (const [k, t] of told) if (now - t > 24 * 60 * 60 * 1000) told.delete(k);
-  if (told.has(onceKey)) return;
-  told.set(onceKey, now);
-  await dmUser(userId, teamId, text);
+  const key = `${onceKey}:${event.channel}`;
+  if (told.has(key)) return;
+  told.set(key, now);
+
+  const sender = store.getUser(event.user);
+  if (sender) {
+    try {
+      const msg = { channel: event.channel, user: event.user, text: `:no_bell: ${text}` };
+      if (event.thread_ts) msg.thread_ts = event.thread_ts;
+      await new WebClient(sender.token).chat.postEphemeral(msg);
+      return;
+    } catch (err) {
+      console.error('Could not post note in conversation:', err.data?.error || err.message);
+    }
+  }
+  await dmUser(event.user, teamId, text);
 }
 
 async function dmUser(userId, teamId, text) {
@@ -289,6 +335,9 @@ async function dmUser(userId, teamId, text) {
 
 /** Schedule a copy of the message for `until`, then delete the original. Returns the held record. */
 async function holdMessage(event, sender, until) {
+  // Slack won't schedule a message for "right now", so hold for at least a minute.
+  const soonest = DateTime.now().plus({ seconds: 60 });
+  if (until < soonest) until = soonest;
   const client = new WebClient(sender.token);
   const postAt = Math.floor(until.toSeconds());
   const base = { channel: event.channel, post_at: postAt, text: event.text || ' ' };
@@ -317,6 +366,7 @@ async function holdMessage(event, sender, until) {
     text: event.text || ' ',
     blocks: event.blocks || null,
     threadTs: event.thread_ts || null,
+    until: until.toUTC().toISO(),
   };
 }
 
@@ -380,13 +430,13 @@ app.event('message', async ({ event, body }) => {
           store.updatePersonalBlock(dmTarget.userId, dmTarget.block.id, (b) => b.held.push(held));
         }
         console.log(`Held message from ${event.user} in ${event.channel} until ${fmt(until)}`);
-        await dmOnce(event.user, teamId, fill(HOLD_MESSAGE, until), `team:${event.user}:${team.block.start.toISO()}`);
+        await notifyOnce(event, teamId, fill(HOLD_MESSAGE, toDT(held.until)), `team:${event.user}:${team.block.start.toISO()}`);
         return;
       } catch (err) {
         console.error('Could not hold message:', err.data?.error || err.message);
       }
     }
-    await dmOnce(event.user, teamId,
+    await notifyOnce(event, teamId,
       fill(NUDGE_MESSAGE, team.block.end) + (sender ? '' : `\n${connectLink()} and your messages will be held automatically.`),
       `team:${event.user}:${team.block.start.toISO()}`);
     return;
@@ -401,13 +451,13 @@ app.event('message', async ({ event, body }) => {
         const held = await holdMessage(event, sender, dmTarget.end);
         store.updatePersonalBlock(dmTarget.userId, dmTarget.block.id, (b) => b.held.push(held));
         console.log(`Held DM from ${event.user} to ${dmTarget.userId} until ${fmt(dmTarget.end)}`);
-        await dmOnce(event.user, teamId, fill(PERSONAL_HOLD_MESSAGE, dmTarget.end, name), onceKey);
+        await notifyOnce(event, teamId, fill(PERSONAL_HOLD_MESSAGE, toDT(held.until), name), onceKey);
         return;
       } catch (err) {
         console.error('Could not hold DM:', err.data?.error || err.message);
       }
     }
-    await dmOnce(event.user, teamId,
+    await notifyOnce(event, teamId,
       fill(PERSONAL_NUDGE_MESSAGE, dmTarget.end, name) + (sender ? '' : `\n${connectLink()} and Block Bot can hold messages like this for you.`),
       onceKey);
     return;
@@ -415,7 +465,7 @@ app.event('message', async ({ event, body }) => {
 
   for (const t of mentionTargets) {
     const name = await nameOf(t.userId, teamId);
-    await dmOnce(event.user, teamId, fill(PERSONAL_NUDGE_MESSAGE, t.end, name), `mention:${event.user}:${t.block.id}`);
+    await notifyOnce(event, teamId, fill(PERSONAL_NUDGE_MESSAGE, t.end, name), `mention:${event.user}:${t.block.id}`);
   }
 });
 

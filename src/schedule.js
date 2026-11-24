@@ -39,4 +39,12 @@ function startCrons() {
   });
 }
 
-module.exports = { TZ, BLOCKS, currentBlock, startCrons };
+/** Cron expressions for each block end. */
+function endCrons() {
+  return BLOCKS.map((b) => {
+    const [h, m] = b.end.split(':').map(Number);
+    return `${m} ${h} * * ${b.weekday % 7}`;
+  });
+}
+
+module.exports = { TZ, BLOCKS, currentBlock, startCrons, endCrons };
