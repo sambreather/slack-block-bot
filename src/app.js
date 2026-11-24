@@ -238,19 +238,19 @@ setInterval(tickPersonal, 20 * 1000);
 // ---------------------------------------------------------------------------
 // Finding out whether a DM is "to" someone in a personal block
 // ---------------------------------------------------------------------------
-const dmChannels = new Map(); // userId -> { ids: Set, at: ms }
+const dmChannels = new Map(); // userId -> { ids: Map(channelId -> other person), at: ms }
 
 async function dmChannelsOf(userId) {
   const cached = dmChannels.get(userId);
   if (cached && Date.now() - cached.at < 2 * 60 * 1000) return cached.ids;
-  const ids = new Set();
+  const ids = new Map();
   const user = store.getUser(userId);
   if (user && (user.scopes || []).includes('im:read')) {
     try {
       let cursor;
       do {
         const res = await new WebClient(user.token).conversations.list({ types: 'im', limit: 1000, cursor });
-        for (const c of res.channels || []) ids.add(c.id);
+        for (const c of res.channels || []) ids.set(c.id, c.user);
         cursor = res.response_metadata?.next_cursor;
       } while (cursor);
     } catch (err) {
@@ -264,15 +264,16 @@ async function dmChannelsOf(userId) {
 // DM channel -> the two people in it (cached)
 const dmMembers = new Map();
 
-/** Who is on the other end of a DM, using the sender's connection if it can see that. */
+/** Who is on the other end of a DM from the sender's point of view, if we can tell. */
 async function otherPartyOf(event) {
-  if (dmMembers.has(event.channel)) return dmMembers.get(event.channel);
+  const known = dmMembers.get(event.channel);
+  if (known) return known.find((u) => u !== event.user) || null;
   const sender = store.getUser(event.user);
   if (sender && (sender.scopes || []).includes('im:read')) {
     try {
       const { channel } = await new WebClient(sender.token).conversations.info({ channel: event.channel });
       if (channel?.user) {
-        dmMembers.set(event.channel, channel.user);
+        dmMembers.set(event.channel, [event.user, channel.user]);
         return channel.user;
       }
     } catch (err) {
@@ -280,6 +281,34 @@ async function otherPartyOf(event) {
     }
   }
   return null;
+}
+
+// Pairs of people whose DMs to each other are never held during team blocks.
+// Railway variable ALLOW_DMS, e.g. "U06QZTKT7+U0B5PTTGRFH, U111+U222".
+const ALLOWED_PAIRS = (process.env.ALLOW_DMS || '')
+  .split(',')
+  .map((p) => p.split('+').map((x) => x.trim()).filter(Boolean))
+  .filter((p) => p.length === 2);
+
+function allowedPartnersOf(userId) {
+  return ALLOWED_PAIRS.filter((p) => p.includes(userId)).map((p) => (p[0] === userId ? p[1] : p[0]));
+}
+
+/** For a 1:1 DM, is the other person someone the sender is allowed to message freely? */
+async function isAllowedDm(event, body) {
+  if (event.channel_type !== 'im') return false;
+  const partners = allowedPartnersOf(event.user);
+  if (!partners.length) return false;
+  // Who is the DM with? Try the sender's connection, then Slack's routing info, then the partner's DM list.
+  const other = await otherPartyOf(event);
+  if (other) return partners.includes(other);
+  const via = (body.authorizations || []).map((a) => a.user_id).find((u) => u !== event.user);
+  if (via) return partners.includes(via);
+  for (const p of partners) {
+    const ids = await dmChannelsOf(p);
+    if (ids.get(event.channel) === event.user) return true;
+  }
+  return false;
 }
 
 async function isDmWith(userId, event, body) {
@@ -453,8 +482,11 @@ async function handleMessage(event, body) {
 
   const now = DateTime.now();
   const sender = store.getUser(event.user);
-  const team = decide(event, { now, isAuthorisedSender: !!sender });
+  let team = decide(event, { now, isAuthorisedSender: !!sender });
   if (team.action === 'urgent') return;
+  if ((team.action === 'hold' || team.action === 'nudge') && await isAllowedDm(event, body)) {
+    team = { action: 'ignore' }; // allowed pair: team block doesn't apply to this DM
+  }
 
   // Is this a DM to, or a mention of, someone in a personal block?
   let dmTarget = null;

@@ -64,6 +64,7 @@ To change the blocks, edit `BLOCKS` in `src/schedule.js` and push.
 | `PERSONAL_HOLD_MESSAGE` | Optional, note when a DM to a blocked person is held (`{name}`, `{time}`) |
 | `PERSONAL_NUDGE_MESSAGE` | Optional, heads-up when a blocked person is messaged/mentioned |
 | `END_OF_DAY`           | Optional, what "rest of the day" means, default `17:30` |
+| `ALLOW_DMS`            | Pairs whose DMs to each other skip team blocks, e.g. `U06QZTKT7+U0B5PTTGRFH, U111+U222` |
 | `HOLD_MESSAGE`         | Optional, default `It’s block time, your message will be delivered at {time}. To bypass the block add !urgent to your message.` |
 
 `{time}` is replaced with the block's end time, e.g. `3pm` or `4.30pm`.
