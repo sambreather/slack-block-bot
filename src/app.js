@@ -362,9 +362,9 @@ async function dmUser(userId, teamId, text) {
 
 /** Schedule a copy of the message for `until`, then delete the original. Returns the held record. */
 // conversation -> last delivery time handed out (seconds). Messages held in the same
-// conversation are delivered 2 seconds apart, in the order they were sent.
+// conversation are delivered 1 second apart, in the order they were sent.
 const lastSlot = new Map();
-const SLOT_GAP = 2;
+const SLOT_GAP = 1;
 
 async function holdMessage(event, sender, until) {
   // Slack won't schedule a message for "right now", so hold for at least a minute.
