@@ -259,10 +259,35 @@ async function dmChannelsOf(userId) {
   return ids;
 }
 
+// DM channel -> the two people in it (cached)
+const dmMembers = new Map();
+
+/** Who is on the other end of a DM, using the sender's connection if it can see that. */
+async function otherPartyOf(event) {
+  if (dmMembers.has(event.channel)) return dmMembers.get(event.channel);
+  const sender = store.getUser(event.user);
+  if (sender && (sender.scopes || []).includes('im:read')) {
+    try {
+      const { channel } = await new WebClient(sender.token).conversations.info({ channel: event.channel });
+      if (channel?.user) {
+        dmMembers.set(event.channel, channel.user);
+        return channel.user;
+      }
+    } catch (err) {
+      console.error('conversations.info failed:', err.data?.error || err.message);
+    }
+  }
+  return null;
+}
+
 async function isDmWith(userId, event, body) {
-  // Fast path: Slack told us this event came via that person's connection.
+  // 1. Slack told us this event came via that person's connection.
   const authUsers = (body.authorizations || []).map((a) => a.user_id);
   if (authUsers.includes(userId)) return true;
+  // 2. The sender's connection can tell us who the DM is with.
+  const other = await otherPartyOf(event);
+  if (other) return other === userId;
+  // 3. The blocked person's own DM list.
   const ids = await dmChannelsOf(userId);
   return ids.has(event.channel);
 }
@@ -412,6 +437,8 @@ app.event('message', async ({ event, body }) => {
         for (const a of active) {
           if (await isDmWith(a.userId, event, body)) { dmTarget = a; break; }
         }
+        console.log(`DM from ${event.user} in ${event.channel} during personal block(s): ` +
+          (dmTarget ? `to ${dmTarget.userId}` : `not to a blocked person (via ${(body.authorizations || []).map((x) => x.user_id).join(',')})`));
       } else {
         const mentioned = new Set([...(event.text || '').matchAll(/<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g)].map((m) => m[1]));
         mentionTargets = active.filter((a) => mentioned.has(a.userId));
@@ -575,6 +602,8 @@ async function logRoster() {
   }));
   names.sort((a, b) => a.localeCompare(b));
   console.log(`Connected people (${names.length}): ${names.join(', ') || 'none'}`);
+  const upgraded = users.filter((u) => (u.scopes || []).includes('im:read')).length;
+  console.log(`${upgraded} of ${users.length} have reconnected since /block was added`);
 }
 
 function publicUrl() {
