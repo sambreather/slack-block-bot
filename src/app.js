@@ -368,20 +368,27 @@ async function holdMessage(event, sender, until) {
   const base = { channel: event.channel, post_at: postAt, text: event.text || ' ' };
   if (event.thread_ts) base.thread_ts = event.thread_ts;
 
+  // 1. Remove the original straight away, so it's visible for as short a time as possible.
+  await client.chat.delete({ channel: event.channel, ts: event.ts });
+
+  // 2. Schedule the copy (keeping formatting if Slack accepts it). If that fails,
+  //    put the message straight back so nothing is ever lost.
   let scheduled;
   try {
-    scheduled = await client.chat.scheduleMessage(event.blocks ? { ...base, blocks: event.blocks } : base);
+    try {
+      scheduled = await client.chat.scheduleMessage(event.blocks ? { ...base, blocks: event.blocks } : base);
+    } catch (err) {
+      if (!event.blocks) throw err;
+      scheduled = await client.chat.scheduleMessage(base);
+    }
   } catch (err) {
-    if (!event.blocks) throw err;
-    scheduled = await client.chat.scheduleMessage(base);
-  }
-
-  try {
-    await client.chat.delete({ channel: event.channel, ts: event.ts });
-  } catch (err) {
-    await client.chat
-      .deleteScheduledMessage({ channel: event.channel, scheduled_message_id: scheduled.scheduled_message_id })
-      .catch(() => {});
+    const back = { channel: event.channel, text: event.text || ' ' };
+    if (event.thread_ts) back.thread_ts = event.thread_ts;
+    const restored = await client.chat.postMessage(event.blocks ? { ...back, blocks: event.blocks } : back)
+      .catch(() => client.chat.postMessage(back))
+      .catch((e) => console.error('Could not restore message!', e.data?.error || e.message, back));
+    // Don't try to hold the restored copy again.
+    if (restored?.ts) seen.set(`${event.channel}:${restored.ts}`, Date.now());
     throw err;
   }
   return {
