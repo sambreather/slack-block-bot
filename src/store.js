@@ -34,6 +34,7 @@ const installationStore = {
         teamId,
         userId: installation.user.id,
         token: installation.user.token,
+        scopes: installation.user.scopes || [],
         installedAt: new Date().toISOString(),
       };
     }
@@ -80,4 +81,58 @@ function removeUser(userId) {
   save(db);
 }
 
-module.exports = { installationStore, allUsers, getUser, getBotToken, removeUser, DATA_DIR };
+// ---------------------------------------------------------------------------
+// Personal blocks: { [userId]: [{ id, start, end, started, held: [...] }] }
+// start/end are ISO strings.
+// ---------------------------------------------------------------------------
+function personalAll() {
+  return load().personal || {};
+}
+
+function addPersonalBlock(userId, start, end) {
+  const db = load();
+  db.personal = db.personal || {};
+  const block = { id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, start, end, started: false, held: [] };
+  (db.personal[userId] = db.personal[userId] || []).push(block);
+  db.personal[userId].sort((a, b) => a.start.localeCompare(b.start));
+  save(db);
+  return block;
+}
+
+function updatePersonalBlock(userId, id, fn) {
+  const db = load();
+  const b = (db.personal?.[userId] || []).find((x) => x.id === id);
+  if (!b) return null;
+  fn(b);
+  save(db);
+  return b;
+}
+
+/** Remove a user's current and upcoming personal blocks; returns what was removed. */
+function cancelPersonalBlocks(userId) {
+  const db = load();
+  const removed = db.personal?.[userId] || [];
+  if (db.personal) delete db.personal[userId];
+  save(db);
+  return removed;
+}
+
+/** Drop blocks that ended more than an hour ago. */
+function prunePersonalBlocks(nowIso) {
+  const db = load();
+  if (!db.personal) return;
+  const cutoff = new Date(Date.parse(nowIso) - 60 * 60 * 1000).toISOString();
+  let changed = false;
+  for (const [userId, blocks] of Object.entries(db.personal)) {
+    const keep = blocks.filter((b) => b.end > cutoff);
+    if (keep.length !== blocks.length) changed = true;
+    if (keep.length) db.personal[userId] = keep;
+    else delete db.personal[userId];
+  }
+  if (changed) save(db);
+}
+
+module.exports = {
+  installationStore, allUsers, getUser, getBotToken, removeUser, DATA_DIR,
+  personalAll, addPersonalBlock, updatePersonalBlock, cancelPersonalBlocks, prunePersonalBlocks,
+};

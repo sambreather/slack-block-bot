@@ -8,6 +8,12 @@ features:
   bot_user:
     display_name: Block Bot
     always_online: true
+  slash_commands:
+    - command: /block
+      url: https://slack-block-bot-production.up.railway.app/slack/events
+      description: Block out your own time (pauses notifications, holds DMs to you)
+      usage_hint: 5pm for an hour · until 4.30 · tomorrow 9-11 · list · cancel
+      should_escape: false
 oauth_config:
   redirect_urls:
     - https://slack-block-bot-production.up.railway.app/slack/oauth_redirect
@@ -16,6 +22,7 @@ oauth_config:
       - chat:write
       - im:write
       - users:read
+      - commands
     user:
       - chat:write
       - dnd:write
@@ -24,6 +31,7 @@ oauth_config:
       - groups:history
       - im:history
       - mpim:history
+      - im:read
 settings:
   event_subscriptions:
     request_url: https://slack-block-bot-production.up.railway.app/slack/events

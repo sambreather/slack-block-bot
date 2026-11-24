@@ -20,6 +20,19 @@ Enforces the team's no-communication blocks (UK time):
   held, so they go through and you get a reminder instead.
 - People who haven't connected yet just get a reminder DM with a link to connect.
 
+**Personal blocks (`/block`)**
+
+Anyone connected can block their own time from any chat's message box:
+`/block for 30 minutes`, `/block 5pm for an hour`, `/block from 2 till 4`,
+`/block until 4.30`, `/block tomorrow 9am for 2 hours`, `/block Friday 10-12`,
+`/block rest of the day`. Also `/block list` and `/block cancel`.
+
+During a personal block: DND + status for that person; DMs sent to them by
+connected people are held until the block ends (sender gets a note); people
+who @mention them in a channel get a heads-up. Cancelling a block delivers
+anything held straight away. "Rest of the day" means until `END_OF_DAY`
+(default 17:30).
+
 To change the blocks, edit `BLOCKS` in `src/schedule.js` and push.
 
 ## Setup
@@ -48,6 +61,9 @@ To change the blocks, edit `BLOCKS` in `src/schedule.js` and push.
 | `URGENT_KEYWORD`       | Optional, default `!urgent`                       |
 | `STATUS_TEXT`          | Optional, default `Block until {time}`            |
 | `NUDGE_MESSAGE`        | Optional, reminder when a message can't be held   |
+| `PERSONAL_HOLD_MESSAGE` | Optional, note when a DM to a blocked person is held (`{name}`, `{time}`) |
+| `PERSONAL_NUDGE_MESSAGE` | Optional, heads-up when a blocked person is messaged/mentioned |
+| `END_OF_DAY`           | Optional, what "rest of the day" means, default `17:30` |
 | `HOLD_MESSAGE`         | Optional, default `It’s block time, your message will be delivered at {time}. To bypass the block add !urgent to your message.` |
 
 `{time}` is replaced with the block's end time, e.g. `3pm` or `4.30pm`.
