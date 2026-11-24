@@ -14,7 +14,7 @@ Enforces the team's no-communication blocks (UK time):
   *Block until 3pm* (both clear themselves when the block ends).
 - If you send a message during a block, the bot removes it and re-sends it
   automatically, as you, the moment the block ends. The first time per block
-  you get a private note: *It’s block time, your message will be delivered at 3pm. To bypass the block add !urgent to the end of your message.*
+  you get a private note: *It’s block time, your message will be delivered at 3pm. To bypass the block add !urgent to your message.*
 - Include `!urgent` in a message and it goes straight through.
 - Messages with files, or thread replies also sent to the channel, can't be
   held, so they go through and you get a reminder instead.
@@ -47,7 +47,8 @@ To change the blocks, edit `BLOCKS` in `src/schedule.js` and push.
 | `DATA_DIR`             | Where tokens are stored (`/data` on a volume)     |
 | `URGENT_KEYWORD`       | Optional, default `!urgent`                       |
 | `STATUS_TEXT`          | Optional, default `Block until {time}`            |
-| `HOLD_MESSAGE`         | Optional, default `It’s block time, your message will be delivered at {time}. To bypass the block add !urgent to the end of your message.` |
+| `NUDGE_MESSAGE`        | Optional, reminder when a message can't be held   |
+| `HOLD_MESSAGE`         | Optional, default `It’s block time, your message will be delivered at {time}. To bypass the block add !urgent to your message.` |
 
 `{time}` is replaced with the block's end time, e.g. `3pm` or `4.30pm`.
 

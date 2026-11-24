@@ -90,7 +90,8 @@ const fmt = (dt) => {
 
 // Editable wording (set these as Railway variables to change them; {time} = block end).
 const STATUS_TEXT = process.env.STATUS_TEXT || 'Block until {time}';
-const HOLD_MESSAGE = process.env.HOLD_MESSAGE || 'It’s block time, your message will be delivered at {time}. To bypass the block add !urgent to the end of your message.';
+const HOLD_MESSAGE = process.env.HOLD_MESSAGE || 'It’s block time, your message will be delivered at {time}. To bypass the block add !urgent to your message.';
+const NUDGE_MESSAGE = process.env.NUDGE_MESSAGE || 'It’s block time until {time}, so people may not see your message until then. To bypass the block add !urgent to your message.';
 const fill = (template, block) => template.replaceAll('{time}', fmt(block.end));
 
 // ---------------------------------------------------------------------------
@@ -208,10 +209,8 @@ app.event('message', async ({ event, body }) => {
   }
 
   await dmSender(event.user, teamId,
-    `It’s block time until ${until}, so people may not see your message until then. ` +
-    (sender
-      ? `(I couldn’t hold that one — messages with files or shared to a channel go straight through.)`
-      :`<${publicUrl()}/slack/install|Connect your account> and the bot will hold messages for you automatically.`),
+    fill(NUDGE_MESSAGE, block) +
+    (sender ? '' : `\n<${publicUrl()}/slack/install|Connect your account> and your messages will be held automatically.`),
     block);
 });
 
