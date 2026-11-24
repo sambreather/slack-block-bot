@@ -361,12 +361,21 @@ async function dmUser(userId, teamId, text) {
 }
 
 /** Schedule a copy of the message for `until`, then delete the original. Returns the held record. */
+// conversation -> last delivery time handed out (seconds). Messages held in the same
+// conversation are delivered 2 seconds apart, in the order they were sent.
+const lastSlot = new Map();
+const SLOT_GAP = 2;
+
 async function holdMessage(event, sender, until) {
   // Slack won't schedule a message for "right now", so hold for at least a minute.
   const soonest = DateTime.now().plus({ seconds: 60 });
   if (until < soonest) until = soonest;
+  const nowSec = Math.floor(Date.now() / 1000);
+  for (const [ch, t] of lastSlot) if (t < nowSec) lastSlot.delete(ch);
+  const postAt = Math.max(Math.floor(until.toSeconds()), (lastSlot.get(event.channel) || 0) + SLOT_GAP);
+  lastSlot.set(event.channel, postAt);
+  until = DateTime.fromSeconds(postAt, { zone: TZ });
   const client = new WebClient(sender.token);
-  const postAt = Math.floor(until.toSeconds());
   const base = { channel: event.channel, post_at: postAt, text: event.text || ' ' };
   if (event.thread_ts) base.thread_ts = event.thread_ts;
 
@@ -426,10 +435,21 @@ async function releaseHeld(held, until = null) {
     .catch((err) => console.error('Could not release held message:', err.data?.error || err.message));
 }
 
+// Handle each conversation's messages one at a time, in the order they arrive,
+// so held messages keep their original order.
+const channelQueues = new Map();
 app.event('message', async ({ event, body }) => {
-  const teamId = body.team_id;
   if (!firstTime(`${event.channel}:${event.ts}`)) return;
   if (!isNewHumanMessage(event)) return;
+  const prev = channelQueues.get(event.channel) || Promise.resolve();
+  const next = prev.then(() => handleMessage(event, body)).catch((err) => console.error('Message handling failed:', err));
+  channelQueues.set(event.channel, next);
+  next.finally(() => { if (channelQueues.get(event.channel) === next) channelQueues.delete(event.channel); });
+  await next;
+});
+
+async function handleMessage(event, body) {
+  const teamId = body.team_id;
 
   const now = DateTime.now();
   const sender = store.getUser(event.user);
@@ -503,7 +523,7 @@ app.event('message', async ({ event, body }) => {
     const name = await nameOf(t.userId, teamId);
     await notifyOnce(event, teamId, fill(PERSONAL_NUDGE_MESSAGE, t.end, name), `mention:${event.user}:${t.block.id}`);
   }
-});
+}
 
 // ---------------------------------------------------------------------------
 // /block command
