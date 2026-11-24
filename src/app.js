@@ -90,7 +90,7 @@ const fmt = (dt) => {
 
 // Editable wording (set these as Railway variables to change them; {time} = block end).
 const STATUS_TEXT = process.env.STATUS_TEXT || 'Block until {time}';
-const HOLD_MESSAGE = process.env.HOLD_MESSAGE || 'It’s block time, your message will be delivered at {time}.';
+const HOLD_MESSAGE = process.env.HOLD_MESSAGE || 'It’s block time, your message will be delivered at {time}. To bypass the block add !urgent to the end of your message.';
 const fill = (template, block) => template.replaceAll('{time}', fmt(block.end));
 
 // ---------------------------------------------------------------------------
