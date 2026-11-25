@@ -146,9 +146,17 @@ function effectiveEnd(userId, now = DateTime.now()) {
 // ---------------------------------------------------------------------------
 // DND + status
 // ---------------------------------------------------------------------------
+/** Should this person's notifications be paused right now (by a team or personal block)? */
+function shouldBePaused(userId, now = DateTime.now()) {
+  if (!effectiveEnd(userId, now)) return false;
+  const inPersonal = activePersonal(now).some((a) => a.userId === userId);
+  return inPersonal || !allowedPartnersOf(userId).length;
+}
+
 async function quietUser(userId, token) {
   const end = effectiveEnd(userId);
   if (!end) return;
+  if (urgentWindow.has(userId)) return; // briefly unpaused for an urgent message; re-paused when that ends
   // People in an allowed DM pair keep notifications on during team blocks (so they hear
   // from each other); everyone else's messages to them are still held. A personal block
   // still pauses them as normal.
@@ -371,7 +379,7 @@ async function notifyOnce(event, teamId, text, onceKey) {
   const sender = store.getUser(event.user);
   if (sender) {
     try {
-      const msg = { channel: event.channel, user: event.user, text: `:no_bell: ${text}` };
+      const msg = { channel: event.channel, user: event.user, text: text.startsWith(':') ? text : `:no_bell: ${text}` };
       if (event.thread_ts) msg.thread_ts = event.thread_ts;
       await new WebClient(sender.token).chat.postEphemeral(msg);
       return;
@@ -469,6 +477,92 @@ async function releaseHeld(held, until = null) {
     .catch((err) => console.error('Could not release held message:', err.data?.error || err.message));
 }
 
+// ---------------------------------------------------------------------------
+// !urgent: ping the people it's for, even though they're in a block
+// ---------------------------------------------------------------------------
+const URGENT_UNPAUSE_SECONDS = Number(process.env.URGENT_UNPAUSE_SECONDS) || 30;
+const urgentWindow = new Map(); // userId -> timer that re-pauses them
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Lift someone's pause, and re-pause them URGENT_UNPAUSE_SECONDS later (restarting the clock if already lifted). */
+async function unpauseBriefly(userId) {
+  const user = store.getUser(userId);
+  if (!user) return false;
+  clearTimeout(urgentWindow.get(userId));
+  urgentWindow.set(userId, setTimeout(async () => {
+    urgentWindow.delete(userId);
+    const u = store.getUser(userId);
+    if (u && shouldBePaused(userId)) await quietUser(userId, u.token).catch(console.error);
+  }, URGENT_UNPAUSE_SECONDS * 1000));
+  try {
+    await new WebClient(user.token).dnd.endSnooze();
+  } catch (err) {
+    if (err.data?.error !== 'snooze_not_active') console.error(`urgent endSnooze ${userId}:`, err.data?.error || err.message);
+  }
+  return true;
+}
+
+/** Who an urgent message is for: named @mentions, plus the other person in a 1:1 DM. */
+async function urgentTargets(event, body) {
+  const ids = new Set([...(event.text || '').matchAll(/<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g)].map((m) => m[1]));
+  if (event.channel_type === 'im') {
+    let other = await otherPartyOf(event);
+    if (!other) other = (body.authorizations || []).map((a) => a.user_id).find((u) => u !== event.user) || null;
+    if (!other) {
+      for (const u of store.allUsers()) {
+        if (u.userId !== event.user && shouldBePaused(u.userId) && await isDmWith(u.userId, event, body)) { other = u.userId; break; }
+      }
+    }
+    if (other) ids.add(other);
+  }
+  ids.delete(event.user);
+  // Only people we've actually paused (connected, in a block, and not exempt).
+  return [...ids].filter((id) => store.getUser(id) && shouldBePaused(id));
+}
+
+async function handleUrgent(event, body, sender) {
+  const targets = await urgentTargets(event, body);
+  if (!targets.length) return; // nobody it's for is paused: nothing to do
+  const teamId = body.team_id;
+  const names = (await Promise.all(targets.map((t) => nameOf(t, teamId)))).join(', ');
+
+  if (sender && canHold(event)) {
+    // Take the message down, lift their pause, then post it again so it pings them.
+    const client = new WebClient(sender.token);
+    try {
+      await client.chat.delete({ channel: event.channel, ts: event.ts });
+      await Promise.all(targets.map(unpauseBriefly));
+      await sleep(1500); // give Slack a moment to register the unpause
+      const msg = { channel: event.channel, text: event.text || ' ' };
+      if (event.thread_ts) msg.thread_ts = event.thread_ts;
+      const posted = await client.chat.postMessage(event.blocks ? { ...msg, blocks: event.blocks } : msg)
+        .catch(() => client.chat.postMessage(msg));
+      if (posted?.ts) seen.set(`${event.channel}:${posted.ts}`, Date.now());
+      console.log(`Urgent message from ${event.user} re-sent to notify ${targets.join(',')}`);
+      await notifyOnce({ ...event, ts: posted?.ts }, teamId, `:rotating_light: Sent as urgent. ${names} ${targets.length === 1 ? 'has' : 'have'} been notified.`, `urgent:${event.ts}`);
+      return;
+    } catch (err) {
+      console.error('Urgent re-send failed:', err.data?.error || err.message);
+      // fall through to the ping below
+    }
+  }
+
+  // Sender not connected (or the message has files): leave the message, and ping them from the bot instead.
+  await Promise.all(targets.map(unpauseBriefly));
+  await sleep(1500);
+  const senderName = await nameOf(event.user, teamId);
+  for (const t of targets) {
+    let link = '';
+    try {
+      const res = await new WebClient(store.getUser(t).token).chat.getPermalink({ channel: event.channel, message_ts: event.ts });
+      link = res.permalink ? ` <${res.permalink}|View message>` : '';
+    } catch { /* no link */ }
+    await dmUser(t, teamId, `:rotating_light: Urgent message from ${senderName}.${link}`);
+  }
+  console.log(`Urgent ping from ${event.user} sent by bot to ${targets.join(',')}`);
+}
+
 // Handle each conversation's messages one at a time, in the order they arrive,
 // so held messages keep their original order.
 const channelQueues = new Map();
@@ -487,8 +581,8 @@ async function handleMessage(event, body) {
 
   const now = DateTime.now();
   const sender = store.getUser(event.user);
+  if (isUrgent(event)) return handleUrgent(event, body, sender);
   let team = decide(event, { now, isAuthorisedSender: !!sender });
-  if (team.action === 'urgent') return;
   if ((team.action === 'hold' || team.action === 'nudge') && await isAllowedDm(event, body)) {
     team = { action: 'ignore' }; // allowed pair: team block doesn't apply to this DM
   }

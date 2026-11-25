@@ -33,6 +33,14 @@ who @mention them in a channel get a heads-up. Cancelling a block delivers
 anything held straight away. "Rest of the day" means until `END_OF_DAY`
 (default 17:30).
 
+**`!urgent`**
+
+A message containing `!urgent` is never held. If it @mentions someone who is in a
+block (or is a 1:1 DM to them), the bot takes it down, lifts their notification
+pause, re-posts it as the sender so it pings them, and re-pauses them 30 seconds
+later (`URGENT_UNPAUSE_SECONDS`). @here/@channel don't unpause anyone. If the
+sender isn't connected, the bot pings the person itself with a link instead.
+
 To change the blocks, edit `BLOCKS` in `src/schedule.js` and push.
 
 ## Setup
