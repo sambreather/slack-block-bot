@@ -14,9 +14,9 @@ test('Monday 14:00–15:00 (GMT, winter)', () => {
   assert.ok(!currentBlock(london('2026-11-23T15:00')));
 });
 
-test('Wednesday runs to 16:30', () => {
-  assert.equal(currentBlock(london('2026-11-25T16:29')).end.toFormat('HH:mm'), '16:30');
-  assert.ok(!currentBlock(london('2026-11-25T16:30')));
+test('Wednesday runs to 15:30', () => {
+  assert.equal(currentBlock(london('2026-11-25T15:29')).end.toFormat('HH:mm'), '15:30');
+  assert.ok(!currentBlock(london('2026-11-25T15:30')));
 });
 
 test('Friday block, and no block Tue/Thu/weekend', () => {

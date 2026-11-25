@@ -5,7 +5,7 @@ Enforces the team's no-communication blocks (UK time):
 | Day       | Block         |
 |-----------|---------------|
 | Monday    | 14:00 – 15:00 |
-| Wednesday | 14:00 – 16:30 |
+| Wednesday | 14:00 – 15:30 |
 | Friday    | 14:00 – 15:00 |
 
 **What it does for everyone who has connected their account**

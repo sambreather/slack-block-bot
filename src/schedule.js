@@ -7,7 +7,7 @@ const TZ = 'Europe/London';
 // weekday: 1 = Monday ... 7 = Sunday (ISO). Times are "HH:mm".
 const BLOCKS = [
   { weekday: 1, start: '14:00', end: '15:00' }, // Monday
-  { weekday: 3, start: '14:00', end: '16:30' }, // Wednesday
+  { weekday: 3, start: '14:00', end: '15:30' }, // Wednesday
   { weekday: 5, start: '14:00', end: '15:00' }, // Friday
 ];
 
