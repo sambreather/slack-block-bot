@@ -569,6 +569,7 @@ const channelQueues = new Map();
 app.event('message', async ({ event, body }) => {
   if (!firstTime(`${event.channel}:${event.ts}`)) return;
   if (!isNewHumanMessage(event)) return;
+  if (takeBypass(event)) return; // sent via "Send now"
   const prev = channelQueues.get(event.channel) || Promise.resolve();
   const next = prev.then(() => handleMessage(event, body)).catch((err) => console.error('Message handling failed:', err));
   channelQueues.set(event.channel, next);
@@ -675,7 +676,7 @@ function helpText() {
     'Block out your own time. Your notifications pause, your status updates, and DMs sent to you are held until your block ends.',
     '',
     `Try: ${EXAMPLES.join(' · ')}`,
-    '`/block list` shows your blocks · `/block cancel` cancels them',
+    '`/block list` shows your blocks · `/block cancel` cancels them · `/block held` shows your held messages',
   ].join('\n');
 }
 
@@ -687,6 +688,115 @@ function listText(userId) {
     .map((b) => `• ${fmtRange(toDT(b.start), toDT(b.end), now)}${toDT(b.start) <= now ? ' _(now)_' : ''}`)
     .join('\n');
 }
+
+// ---------------------------------------------------------------------------
+// /block held: see, send or delete your held messages
+// ---------------------------------------------------------------------------
+// Messages we post on someone's behalf that must not be held again: key -> expiry ms
+const bypass = new Map();
+const bypassKey = (channel, user, text) => `${channel}|${user}|${(text || '').trim()}`;
+function takeBypass(event) {
+  const now = Date.now();
+  for (const [k, t] of bypass) if (t < now) bypass.delete(k);
+  const key = bypassKey(event.channel, event.user, event.text);
+  if (!bypass.has(key)) return false;
+  bypass.delete(key);
+  return true;
+}
+
+const convLabels = new Map();
+async function conversationLabel(user, channelId) {
+  if (convLabels.has(`${user.userId}:${channelId}`)) return convLabels.get(`${user.userId}:${channelId}`);
+  let label = `<#${channelId}>`;
+  if (/^[DG]/.test(channelId) && (user.scopes || []).includes('im:read')) {
+    try {
+      const { channel } = await new WebClient(user.token).conversations.info({ channel: channelId });
+      if (channel?.is_im && channel.user) label = `DM with <@${channel.user}>`;
+      else if (channel?.is_mpim) label = 'a group DM';
+    } catch { /* keep default */ }
+  } else if (channelId.startsWith('D')) {
+    label = 'a DM';
+  }
+  convLabels.set(`${user.userId}:${channelId}`, label);
+  return label;
+}
+
+async function heldView(user) {
+  const res = await new WebClient(user.token).chat.scheduledMessages.list({ limit: 100 });
+  const msgs = (res.scheduled_messages || []).sort((a, b) => a.post_at - b.post_at);
+  if (!msgs.length) {
+    return { text: 'You have no held messages.', blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'You have no held messages. :white_check_mark:' } }] };
+  }
+  const blocks = [{ type: 'section', text: { type: 'mrkdwn', text: `*Your held messages (${msgs.length})*` } }];
+  for (const m of msgs.slice(0, 15)) {
+    const where = await conversationLabel(user, m.channel_id);
+    const when = fmt(DateTime.fromSeconds(m.post_at, { zone: TZ }));
+    let snippet = (m.text || '').replace(/\s+/g, ' ').trim();
+    if (snippet.length > 140) snippet = snippet.slice(0, 140) + '…';
+    const value = JSON.stringify({ c: m.channel_id, id: m.id });
+    blocks.push(
+      { type: 'divider' },
+      { type: 'section', text: { type: 'mrkdwn', text: `*${where}* · sends at ${when}\n> ${snippet || '_(no text)_'}` } },
+      {
+        type: 'actions',
+        elements: [
+          { type: 'button', text: { type: 'plain_text', text: 'Send now' }, action_id: 'held_send', value },
+          {
+            type: 'button', text: { type: 'plain_text', text: 'Delete' }, style: 'danger', action_id: 'held_delete', value,
+            confirm: {
+              title: { type: 'plain_text', text: 'Delete this message?' },
+              text: { type: 'plain_text', text: 'It won’t be sent.' },
+              confirm: { type: 'plain_text', text: 'Delete' },
+              deny: { type: 'plain_text', text: 'Keep it' },
+            },
+          },
+        ],
+      },
+    );
+  }
+  if (msgs.length > 15) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `…and ${msgs.length - 15} more.` }] });
+  return { text: `You have ${msgs.length} held message(s).`, blocks };
+}
+
+const TOO_LATE = 'That message is sending within the next minute (or has already been sent), so it can’t be changed now.';
+
+app.action('held_send', async ({ ack, body, action, respond }) => {
+  await ack();
+  const user = store.getUser(body.user.id);
+  if (!user) return;
+  const { c, id } = JSON.parse(action.value);
+  const client = new WebClient(user.token);
+  try {
+    const { scheduled_messages: list = [] } = await client.chat.scheduledMessages.list({ channel: c, limit: 100 });
+    const msg = list.find((m) => m.id === id);
+    if (!msg) throw Object.assign(new Error('gone'), { data: { error: 'invalid_scheduled_message_id' } });
+    await client.chat.deleteScheduledMessage({ channel: c, scheduled_message_id: id });
+    bypass.set(bypassKey(c, user.userId, msg.text), Date.now() + 60 * 1000);
+    await client.chat.postMessage({ channel: c, text: msg.text || ' ' });
+    console.log(`${user.userId} sent a held message now in ${c}`);
+    await respond({ replace_original: true, ...(await heldView(user)) });
+  } catch (err) {
+    const tooLate = err.data?.error === 'invalid_scheduled_message_id';
+    if (!tooLate) console.error('Send now failed:', err.data?.error || err.message);
+    await respond({ replace_original: false, response_type: 'ephemeral', text: tooLate ? TOO_LATE : 'Sorry, that didn’t work. Please try again.' });
+  }
+});
+
+app.action('held_delete', async ({ ack, body, action, respond }) => {
+  await ack();
+  const user = store.getUser(body.user.id);
+  if (!user) return;
+  const { c, id } = JSON.parse(action.value);
+  try {
+    await new WebClient(user.token).chat.deleteScheduledMessage({ channel: c, scheduled_message_id: id });
+    console.log(`${user.userId} deleted a held message in ${c}`);
+    await respond({ replace_original: true, ...(await heldView(user)) });
+  } catch (err) {
+    const tooLate = err.data?.error === 'invalid_scheduled_message_id';
+    if (!tooLate) console.error('Delete failed:', err.data?.error || err.message);
+    await respond({ replace_original: false, response_type: 'ephemeral', text: tooLate ? TOO_LATE : 'Sorry, that didn’t work. Please try again.' });
+  }
+});
 
 app.command('/block', async ({ command, ack }) => {
   const userId = command.user_id;
@@ -700,6 +810,14 @@ app.command('/block', async ({ command, ack }) => {
   }
   if (!text || /^(help|\?)$/.test(lower)) return reply(`${helpText()}\n\n${listText(userId)}`);
   if (/^(list|status|show|mine)$/.test(lower)) return reply(listText(userId));
+  if (/^(held|holding|queue|queued|scheduled|pending|messages)$/.test(lower)) {
+    try {
+      return ack({ response_type: 'ephemeral', ...(await heldView(user)) });
+    } catch (err) {
+      console.error('Held list failed:', err.data?.error || err.message);
+      return reply('Sorry, I couldn’t load your held messages just now.');
+    }
+  }
 
   if (/^(cancel|stop|end|clear|remove|delete|off|unblock)\b/.test(lower)) {
     const now = DateTime.now();

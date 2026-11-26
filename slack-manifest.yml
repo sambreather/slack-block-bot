@@ -33,6 +33,9 @@ oauth_config:
       - mpim:history
       - im:read
 settings:
+  interactivity:
+    is_enabled: true
+    request_url: https://slack-block-bot-production.up.railway.app/slack/events
   event_subscriptions:
     request_url: https://slack-block-bot-production.up.railway.app/slack/events
     user_events:

@@ -25,7 +25,8 @@ Enforces the team's no-communication blocks (UK time):
 Anyone connected can block their own time from any chat's message box:
 `/block for 30 minutes`, `/block 5pm for an hour`, `/block from 2 till 4`,
 `/block until 4.30`, `/block tomorrow 9am for 2 hours`, `/block Friday 10-12`,
-`/block rest of the day`. Also `/block list` and `/block cancel`.
+`/block rest of the day`. Also `/block list`, `/block cancel`, and `/block held`
+(your held messages, with Send now / Delete buttons).
 
 During a personal block: DND + status for that person; DMs sent to them by
 connected people are held until the block ends (sender gets a note); people
