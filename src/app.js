@@ -17,7 +17,7 @@ const { WebClient } = require('@slack/web-api');
 const cron = require('node-cron');
 const { DateTime } = require('luxon');
 
-const { TZ, currentBlock, startCrons, endCrons } = require('./schedule');
+const { TZ, BLOCKS, currentBlock, startCrons, endCrons } = require('./schedule');
 const { decide, isNewHumanMessage, canHold, isUrgent } = require('./policy');
 const { parseBlock, fmtTime, fmtRange } = require('./parse-block');
 const store = require('./store');
@@ -676,7 +676,47 @@ function helpText() {
     'Block out your own time. Your notifications pause, your status updates, and DMs sent to you are held until your block ends.',
     '',
     `Try: ${EXAMPLES.join(' · ')}`,
-    '`/block list` shows your blocks · `/block cancel` cancels them · `/block held` shows your held messages',
+    '`/block list` shows your blocks · `/block cancel` cancels them · `/block held` shows your held messages · `/block info` explains everything',
+  ].join('\n');
+}
+
+function teamBlocksText() {
+  const days = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const t = (hhmm) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return `${h % 12 || 12}${m ? `.${String(m).padStart(2, '0')}` : ''}`;
+  };
+  return BLOCKS.map((b) => `${days[b.weekday]} ${t(b.start)}–${t(b.end)}${Number(b.end.split(':')[0]) >= 12 ? 'pm' : 'am'}`).join(', ');
+}
+
+function infoText() {
+  return [
+    '*Block Bot: everything you can do*',
+    '',
+    '*Set a personal block*',
+    'Pauses your notifications, sets your status, and holds DMs sent to you until it ends.',
+    '• `/block for 30 minutes` · `/block 1h` · `/block half an hour`: starting now',
+    '• `/block 5pm for an hour` · `/block at 3 for 45 mins`: later today',
+    '• `/block from 2 till 4` · `/block 2pm-4pm`: a set time range',
+    '• `/block until 4.30` · `/block rest of the day`: from now until a time',
+    '• `/block in 10 minutes for an hour`: starting a little later',
+    '• `/block tomorrow 9am for 2 hours` · `/block Friday 10-12`: another day',
+    'If you don’t say how long, it’s 1 hour. Blocks can be up to 12 hours, up to 2 weeks ahead.',
+    '',
+    '*Manage your blocks*',
+    '• `/block list`: see your upcoming personal blocks',
+    '• `/block cancel`: cancel them (anything held for you is delivered straight away)',
+    '',
+    '*Your held messages*',
+    '• `/block held`: see messages of yours that are being held, with *Send now* and *Delete* buttons',
+    '',
+    '*During any block*',
+    '• Add `!urgent` to a message to send it straight away. Anyone you @mention (or the person you’re DMing) gets notified, even if they’re in a block.',
+    '• Messages with files or images can’t be held, so they go straight through.',
+    '',
+    `*Team blocks*: ${teamBlocksText()}. Everyone’s notifications pause and messages are held until the block ends. \`/block cancel\` doesn’t affect these.`,
+    '',
+    '`/block info` shows this guide again.',
   ].join('\n');
 }
 
@@ -808,7 +848,8 @@ app.command('/block', async ({ command, ack }) => {
   if (!user) {
     return reply(`To use \`/block\`, first ${connectLink().replace('Connect', 'connect')} to Block Bot (takes 10 seconds), then try again.`);
   }
-  if (!text || /^(help|\?)$/.test(lower)) return reply(`${helpText()}\n\n${listText(userId)}`);
+  if (/^(info|help|\?|guide|commands|how)$/.test(lower)) return reply(infoText());
+  if (!text) return reply(`${helpText()}\n\n${listText(userId)}`);
   if (/^(list|status|show|mine)$/.test(lower)) return reply(listText(userId));
   if (/^(held|holding|queue|queued|scheduled|pending|messages)$/.test(lower)) {
     try {
